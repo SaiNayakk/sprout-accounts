@@ -47,8 +47,10 @@ public class Accounts {
     private final AccountsProperties props;
     private final Custody custody;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+    private final Onward onward;
 
-    public Accounts(JdbcClient db, Clock clock, AccountsProperties props, Custody custody) {
+    public Accounts(JdbcClient db, Clock clock, AccountsProperties props, Custody custody, Onward onward) {
+        this.onward = onward;
         this.db = db;
         this.clock = clock;
         this.props = props;
@@ -109,9 +111,9 @@ public class Accounts {
         if (!vpa.matches("^[a-z0-9.\\-_]{2,64}@[a-z]{2,32}$")) {
             throw new ApiException(ErrorCode.VPA_NOT_FOUND, "That isn't a UPI address. It looks like name@sproutbank.");
         }
-        HttpRequest req = HttpRequest.newBuilder(URI.create(props.bank().url() + "/partner/v1/vpas/"
+        HttpRequest req = onward.headers(HttpRequest.newBuilder(URI.create(props.bank().url() + "/partner/v1/vpas/"
                         + URLEncoder.encode(vpa, StandardCharsets.UTF_8)))
-                .timeout(Duration.ofSeconds(3)).header("X-Partner-Key", props.bank().partnerKey()).GET().build();
+                .timeout(Duration.ofSeconds(3)).header("X-Partner-Key", props.bank().partnerKey()).GET()).build();
         int status;
         try {
             status = http.send(req, HttpResponse.BodyHandlers.discarding()).statusCode();

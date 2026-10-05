@@ -55,7 +55,7 @@ public class AccountsController {
         if (key == null || !MessageDigest.isEqual(key.getBytes(), props.serviceKey().getBytes())) {
             throw new ApiException(ErrorCode.UNAUTHENTICATED, "Only Sprout services can call this.");
         }
-        return dto(accounts.find(userId).orElseThrow(() -> new ApiException(ErrorCode.NO_ACCOUNT, "No account for that user.")));
+        return dto(accounts.ensureDemat(userId).orElseThrow(() -> new ApiException(ErrorCode.NO_ACCOUNT, "No account for that user.")));
     }
 
     private static UUID userId(String header) {
@@ -67,7 +67,17 @@ public class AccountsController {
     }
 
     static Map<String, Object> dto(Account a) {
-        return Map.of("id", a.id().toString(), "userId", a.userId().toString(), "legalName", a.legalName(),
-                "panMasked", a.panMasked(), "bankVpa", a.bankVpa(), "status", a.status(), "openedAt", a.openedAt().toString());
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", a.id().toString());
+        m.put("userId", a.userId().toString());
+        m.put("legalName", a.legalName());
+        m.put("panMasked", a.panMasked());
+        m.put("bankVpa", a.bankVpa());
+        m.put("status", a.status());
+        if (a.dematAccount() != null) {
+            m.put("dematAccount", a.dematAccount());
+        }
+        m.put("openedAt", a.openedAt().toString());
+        return m;
     }
 }

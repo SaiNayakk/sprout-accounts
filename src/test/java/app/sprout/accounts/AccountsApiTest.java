@@ -1,6 +1,7 @@
 package app.sprout.accounts;
 
 import static com.atlassian.oai.validator.mockmvc.OpenApiValidationMatchers.openApi;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -42,6 +43,9 @@ class AccountsApiTest {
 
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:18-alpine");
+    static final java.util.Map<String, String> DEMAT = new java.util.concurrent.ConcurrentHashMap<>();       // clientRef -> boId
+    static final java.util.Map<String, String> REGISTERED = new java.util.concurrent.ConcurrentHashMap<>();  // clientCode -> boId
+    static final java.util.concurrent.atomic.AtomicBoolean DEPOSITORY_DOWN = new java.util.concurrent.atomic.AtomicBoolean();
     static final HttpServer BANK = bank();
 
     @DynamicPropertySource
@@ -50,6 +54,8 @@ class AccountsApiTest {
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
         r.add("sprout.accounts.bank.url", () -> "http://127.0.0.1:" + BANK.getAddress().getPort());
+        r.add("sprout.accounts.depository.url", () -> "http://127.0.0.1:" + BANK.getAddress().getPort());
+        r.add("sprout.accounts.clearing.url", () -> "http://127.0.0.1:" + BANK.getAddress().getPort());
     }
 
     @TestConfiguration
@@ -97,6 +103,33 @@ class AccountsApiTest {
                 .andExpect(jsonPath("$.legalName").value("Asha Rao"));
         mvc.perform(get("/v1/accounts/me").header("X-User-Id", user.toString())).andExpect(status().isOk()).andExpect(MATCHES_CONTRACT);
         open(user, Map.of()).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ACCOUNT_EXISTS"));
+    }
+
+    @Test
+    void everyAccountGetsADematAccountRegisteredForSettlement() throws Exception {
+        UUID user = UUID.randomUUID();
+        String demat = json.readTree(open(user, Map.of()).andExpect(status().isCreated()).andExpect(MATCHES_CONTRACT)
+                .andReturn().getResponse().getContentAsString()).path("dematAccount").asText();
+        assertThat(demat).matches("[0-9]{16}");
+        assertThat(DEMAT.get(user.toString())).isEqualTo(demat);
+        assertThat(REGISTERED.get(user.toString())).as("registered with clearing under the user's id").isEqualTo(demat);
+        mvc.perform(get("/internal/v1/accounts/" + user).header("X-Service-Key", "dev-only-service-key"))
+                .andExpect(jsonPath("$.dematAccount").value(demat));
+    }
+
+    @Test
+    void ifTheDepositoryIsAwayNothingIsSavedAndTryingAgainWorks() throws Exception {
+        UUID user = UUID.randomUUID();
+        String pan = newPan();
+        DEPOSITORY_DOWN.set(true);
+        try {
+            open(user, Map.of("pan", pan)).andExpect(status().isServiceUnavailable()).andExpect(MATCHES_CONTRACT)
+                    .andExpect(jsonPath("$.code").value("UPSTREAM_UNAVAILABLE"));
+        } finally {
+            DEPOSITORY_DOWN.set(false);
+        }
+        mvc.perform(get("/v1/accounts/me").header("X-User-Id", user.toString())).andExpect(status().isNotFound());
+        open(user, Map.of("pan", pan)).andExpect(status().isCreated());
     }
 
     @Test
@@ -153,6 +186,28 @@ class AccountsApiTest {
                 if (body.length > 0) {
                     ex.getResponseBody().write(body);
                 }
+                ex.close();
+            });
+            s.createContext("/participant/v1/accounts", ex -> {
+                if (DEPOSITORY_DOWN.get()) {
+                    ex.sendResponseHeaders(503, -1);
+                    ex.close();
+                    return;
+                }
+                String ref = new ObjectMapper().readTree(ex.getRequestBody().readAllBytes()).path("clientRef").asText();
+                boolean fresh = !DEMAT.containsKey(ref);
+                String bo = DEMAT.computeIfAbsent(ref, k -> "12081600" + String.format("%08d", DEMAT.size() + 1));
+                byte[] body = ("{\"boId\":\"" + bo + "\"}").getBytes();
+                ex.sendResponseHeaders(fresh ? 201 : 200, body.length);
+                ex.getResponseBody().write(body);
+                ex.close();
+            });
+            s.createContext("/member/v1/clients/", ex -> {
+                String code = ex.getRequestURI().getPath().substring("/member/v1/clients/".length());
+                REGISTERED.put(code, new ObjectMapper().readTree(ex.getRequestBody().readAllBytes()).path("boId").asText());
+                byte[] body = "{}".getBytes();
+                ex.sendResponseHeaders(201, body.length);
+                ex.getResponseBody().write(body);
                 ex.close();
             });
             s.start();

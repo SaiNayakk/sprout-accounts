@@ -10,6 +10,10 @@ The PAN is never stored in clear: only masked (`XXXXX1234K`) for display and as 
 (HMAC with a server-side pepper) to enforce one account per PAN. Other Sprout services read accounts
 on `/internal` with the service key.
 
+**A demat account with every account.** Opening a Sprout account also opens the customer's demat account
+at the depository (Sprout is their depository participant) and registers it with the clearing corporation
+under their client code, so their trades settle into it. If either is unreachable, nothing is saved.
+
 ## Part of Sprout
 
 [Sprout](https://sainayakk.github.io/sprout-platform/) is a simulated brokerage built from scratch as

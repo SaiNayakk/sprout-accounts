@@ -14,13 +14,13 @@
   <!-- Released as git tags vX.Y.Z; hosts build a release from its tag (sprout-platform ADR-011). -->
   <groupId>com.github.SaiNayakk</groupId>
   <artifactId>sprout-accounts</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <name>sprout-accounts</name>
   <description>Sprout accounts: simulated KYC and a linked Sprout Bank UPI address.</description>
 
   <properties>
     <java.version>21</java.version>
-    <sprout-contracts.version>0.4.0</sprout-contracts.version>
+    <sprout-contracts.version>0.6.0</sprout-contracts.version>
   </properties>
 
   <repositories>

@@ -1,0 +1,74 @@
+# Configuration for the accounts service. Named accounts.yml (not application.yml) so several services can
+# share one JVM host without their settings colliding.
+spring:
+  application:
+    name: sprout-accounts
+  datasource:
+    url: ${ACCOUNTS_DB_URL:jdbc:postgresql://localhost:5432/sprout?currentSchema=accounts}
+    username: ${ACCOUNTS_DB_USER:sprout}
+    password: ${ACCOUNTS_DB_PASSWORD:sprout}
+    hikari:
+      maximum-pool-size: 5
+      pool-name: accounts
+      connection-timeout: 2000   # fail fast when the database is gone (CHAOS-01's lesson)
+      validation-timeout: 1000
+  flyway:
+    locations: classpath:db/accounts
+    schemas: accounts
+    default-schema: accounts
+  jackson:
+    default-property-inclusion: non_null   # absent, never null: the contracts say so
+    deserialization:
+      fail-on-unknown-properties: true
+  jmx:
+    enabled: false
+
+server:
+  port: ${ACCOUNTS_PORT:8104}
+  address: ${ACCOUNTS_BIND:127.0.0.1}
+  tomcat:
+    threads:
+      max: 16
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  otlp:
+    metrics:
+      export:
+        enabled: ${OTEL_ENABLED:false}
+        url: ${OTEL_METRICS_URL:http://localhost:4318/v1/metrics}
+        step: 15s
+    tracing:
+      endpoint: ${OTEL_TRACES_URL:http://localhost:4318/v1/traces}
+  tracing:
+    enabled: ${OTEL_ENABLED:false}
+    sampling:
+      probability: 1.0
+  metrics:
+    tags:
+      service: sprout-accounts
+
+logging:
+  structured:
+    format:
+      console: ${LOG_FORMAT:}
+  pattern:
+    correlation: "[%X{requestId:-}] "
+
+sprout:
+  accounts:
+    minimum-age: 18
+    # Keys PANs before they're stored (never stored in clear), so one PAN can't open two accounts.
+    pan-pepper: ${ACCOUNTS_PAN_PEPPER:dev-only-pan-pepper}
+    # Other Sprout services read accounts on /internal with this key.
+    service-key: ${SPROUT_SERVICE_KEY:dev-only-service-key}
+    bank:
+      url: ${ACCOUNTS_BANK_URL:http://127.0.0.1:8107}
+      partner-key: ${BANK_SPROUT_PARTNER_KEY:dev-only-partner-key}

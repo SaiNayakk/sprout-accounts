@@ -72,3 +72,11 @@ sprout:
     bank:
       url: ${ACCOUNTS_BANK_URL:http://127.0.0.1:8107}
       partner-key: ${BANK_SPROUT_PARTNER_KEY:dev-only-partner-key}
+    # Every customer gets a demat account (Sprout is their depository participant), registered with the
+    # clearing corporation so their trades settle into it.
+    depository:
+      url: ${ACCOUNTS_DEPOSITORY_URL:http://127.0.0.1:8111}
+      participant-key: ${DEPOSITORY_SPROUT_PARTICIPANT_KEY:dev-only-participant-key}
+    clearing:
+      url: ${ACCOUNTS_CLEARING_URL:http://127.0.0.1:8110}
+      member-key: ${CLEARING_SPROUT_MEMBER_KEY:dev-only-clearing-member-key}

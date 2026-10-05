@@ -34,7 +34,8 @@ import org.springframework.stereotype.Service;
 @Service
 public class Accounts {
 
-    public record Account(UUID id, UUID userId, String legalName, String panMasked, String bankVpa, String status, Instant openedAt) {}
+    public record Account(UUID id, UUID userId, String legalName, String panMasked, String bankVpa, String status, String dematAccount,
+                          Instant openedAt) {}
 
     /** An individual's PAN: three letters, P (person), a letter, four digits, a letter. */
     private static final Pattern PAN = Pattern.compile("^[A-Z]{3}P[A-Z][0-9]{4}[A-Z]$");
@@ -44,12 +45,14 @@ public class Accounts {
     private final JdbcClient db;
     private final Clock clock;
     private final AccountsProperties props;
+    private final Custody custody;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
 
-    public Accounts(JdbcClient db, Clock clock, AccountsProperties props) {
+    public Accounts(JdbcClient db, Clock clock, AccountsProperties props, Custody custody) {
         this.db = db;
         this.clock = clock;
         this.props = props;
+        this.custody = custody;
     }
 
     public Account open(UUID userId, String legalName, LocalDate birthDate, String panInput, String vpaInput) {
@@ -76,11 +79,16 @@ public class Accounts {
         }
         String vpa = vpaInput == null ? "" : vpaInput.trim().toLowerCase(Locale.ROOT);
         verifyVpa(vpa);
+        if (db.sql("SELECT 1 FROM accounts WHERE pan_hash = ?").param(panHash(pan)).query(Integer.class).optional().isPresent()) {
+            throw new ApiException(ErrorCode.PAN_IN_USE, "This PAN already has a Sprout account.");
+        }
+        // last, once everything else is known to be fine: the demat account is real, outside Sprout
+        String boId = custody.dematFor(userId, name);
         UUID id = UUID.randomUUID();
         try {
-            db.sql("INSERT INTO accounts (id, user_id, legal_name, birth_date, pan_hash, pan_masked, bank_vpa, status, opened_at) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?)")
-                    .params(id, userId, name, Date.valueOf(birthDate), panHash(pan), "XXXXX" + pan.substring(5), vpa,
+            db.sql("INSERT INTO accounts (id, user_id, legal_name, birth_date, pan_hash, pan_masked, bank_vpa, status, bo_id, opened_at) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)")
+                    .params(id, userId, name, Date.valueOf(birthDate), panHash(pan), "XXXXX" + pan.substring(5), vpa, boId,
                             Timestamp.from(clock.instant()))
                     .update();
         } catch (DuplicateKeyException e) {
@@ -124,8 +132,19 @@ public class Accounts {
     }
 
     public Optional<Account> find(UUID userId) {
-        return db.sql("SELECT id, user_id, legal_name, pan_masked, bank_vpa, status, opened_at FROM accounts WHERE user_id = ?")
+        return db.sql("SELECT id, user_id, legal_name, pan_masked, bank_vpa, status, bo_id, opened_at FROM accounts WHERE user_id = ?")
                 .param(userId).query(Accounts::account).optional();
+    }
+
+    /** The account, with a demat account opened for it first if it was opened before demat accounts existed. */
+    public Optional<Account> ensureDemat(UUID userId) {
+        Optional<Account> a = find(userId);
+        if (a.isPresent() && a.get().dematAccount() == null) {
+            String boId = custody.dematFor(userId, a.get().legalName());
+            db.sql("UPDATE accounts SET bo_id = ? WHERE user_id = ? AND bo_id IS NULL").params(boId, userId).update();
+            return find(userId);
+        }
+        return a;
     }
 
     private String panHash(String pan) {
@@ -140,6 +159,7 @@ public class Accounts {
 
     private static Account account(ResultSet rs, int n) throws SQLException {
         return new Account(rs.getObject("id", UUID.class), rs.getObject("user_id", UUID.class), rs.getString("legal_name"),
-                rs.getString("pan_masked"), rs.getString("bank_vpa"), rs.getString("status"), rs.getTimestamp("opened_at").toInstant());
+                rs.getString("pan_masked"), rs.getString("bank_vpa"), rs.getString("status"), rs.getString("bo_id"),
+                rs.getTimestamp("opened_at").toInstant());
     }
 }
